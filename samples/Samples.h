@@ -32,7 +32,9 @@ extern "C" {
 
 #define SAMPLE_MASTER_CLIENT_ID "ProducerMaster"
 #define SAMPLE_VIEWER_CLIENT_ID "ConsumerViewer"
-#define SAMPLE_CHANNEL_NAME     (PCHAR) "ScaryTestChannel"
+#define SAMPLE_CHANNEL_NAME     (PCHAR) "actionbricks_demo_darts"
+#define SAMPLE_DEFAULT_REGION   (PCHAR) "us-east-1"
+#define SAMPLE_RTSP_URI         (PCHAR) "rtsp://test12345:test12345@192.168.0.187:554/stream2"
 
 #define DEFAULT_AUDIO_OPUS_BYTE_RATE (DEFAULT_AUDIO_OPUS_SAMPLE_RATE_HZ * DEFAULT_AUDIO_OPUS_CHANNELS * DEFAULT_AUDIO_OPUS_BITS_PER_SAMPLE) / 8
 

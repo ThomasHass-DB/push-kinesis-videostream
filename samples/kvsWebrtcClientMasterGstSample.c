@@ -374,6 +374,11 @@ INT32 main(INT32 argc, CHAR* argv[])
 
     CHK_STATUS(createSampleConfiguration(pChannelName, SIGNALING_CHANNEL_ROLE_TYPE_MASTER, TRUE, TRUE, logLevel, &pSampleConfiguration));
 
+    if (GETENV(DEFAULT_REGION_ENV_VAR) == NULL) {
+        pSampleConfiguration->channelInfo.pRegion = SAMPLE_DEFAULT_REGION;
+        DLOGI("[KVS GStreamer Master] Defaulting region to %s", pSampleConfiguration->channelInfo.pRegion);
+    }
+
     if (argc > 3 && STRCMP(argv[3], "testsrc") == 0) {
         if (argc > 4) {
             if (!STRCMP(argv[4], AUDIO_CODEC_NAME_OPUS)) {
@@ -443,6 +448,18 @@ INT32 main(INT32 argc, CHAR* argv[])
         }
     } else {
         DLOGI("[KVS GStreamer Master] Using device source in GStreamer");
+    }
+
+    BOOL sourceSpecified = argc > 3;
+    BOOL hasRtspUriArg = argc > 4 && !IS_EMPTY_STRING(argv[4]);
+
+    if (!sourceSpecified) {
+        pSampleConfiguration->srcType = RTSP_SOURCE;
+        pSampleConfiguration->rtspUri = SAMPLE_RTSP_URI;
+        DLOGI("[KVS GStreamer Master] Defaulting to RTSP source %s", pSampleConfiguration->rtspUri);
+    } else if (pSampleConfiguration->srcType == RTSP_SOURCE && !hasRtspUriArg) {
+        pSampleConfiguration->rtspUri = SAMPLE_RTSP_URI;
+        DLOGI("[KVS GStreamer Master] Using default RTSP URI %s", pSampleConfiguration->rtspUri);
     }
 
     switch (pSampleConfiguration->mediaType) {
