@@ -301,17 +301,41 @@ Allowed audio-codec: opus (default codec if nothing is specified)
 Allowed video-codec: h264 (default codec if nothing is specified), h265
 
 #### Sample: kvsWebrtcClientMasterGstSample
-This application can send media from a GStreamer pipeline using test H264/Opus frames, device `autovideosrc` and `autoaudiosrc` input, or a received RTSP stream. It also will playback incoming audio via an `autoaudiosink`. To run:
+This application can send media from a GStreamer pipeline using test H264/Opus frames, a local camera device (USB webcam, etc.), or a received RTSP stream. It also will playback incoming audio via an `autoaudiosink`. To run:
 ```shell
 ./samples/kvsWebrtcClientMasterGstSample <channelName> <mediaType> <sourceType>
 ```
-Pass the desired media and source type when running the sample. The mediaType can be `audio-video` or `video-only`. To use the **Storage For WebRTC** feature, use `audio-video-storage` as the mediaType. The source type can be `testsrc`, `devicesrc`, or `rtspsrc`. Specify the RTSP URI if using `rtspsrc`:
+Pass the desired media and source type when running the sample. The mediaType can be `audio-video` or `video-only`. To use the **Storage For WebRTC** feature, use `audio-video-storage` as the mediaType. The source type can be `testsrc`, `devicesrc`, or `rtspsrc`.
 
+**Default behavior:** When no source type is specified, the sample defaults to `devicesrc` and will prompt you to select a camera interactively.
+
+##### Using devicesrc (local camera / USB webcam)
+
+When using `devicesrc`, the application lists all available video capture devices and prompts you to select one:
+```shell
+./samples/kvsWebrtcClientMasterGstSample <channelName> video-only devicesrc
+```
+
+To skip the interactive prompt, pass the device index (zero-based) directly:
+```shell
+./samples/kvsWebrtcClientMasterGstSample <channelName> video-only devicesrc <deviceIndex>
+```
+
+Example (select the second camera):
+```shell
+./samples/kvsWebrtcClientMasterGstSample myChannel video-only devicesrc 1
+```
+
+If no devices are found or the selection is invalid, the application falls back to `autovideosrc`.
+
+##### Using rtspsrc
+
+Specify the RTSP URI if using `rtspsrc`:
 ```shell
 ./samples/kvsWebrtcClientMasterGstSample <channelName> <mediaType> rtspsrc rtsp://<rtspUri>
 ```
 
-Using the testsrc with audio and video-codec
+##### Using testsrc with audio and video-codec
 ```shell
 ./samples/kvsWebrtcClientMasterGstSample <channelName> <mediaType> <sourceType> <audio-codec> <video-codec>
 ```

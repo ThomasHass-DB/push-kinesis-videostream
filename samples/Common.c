@@ -362,6 +362,11 @@ STATUS initializePeerConnection(PSampleConfiguration pSampleConfiguration, PRtcP
     // Set this to custom callback to enable filtering of interfaces
     configuration.kvsRtcConfiguration.iceSetInterfaceFilterFunc = NULL;
 
+    // Increase ICE timeouts for networks where TURN/SRFLX gathering is slow
+    configuration.kvsRtcConfiguration.iceLocalCandidateGatheringTimeout = 30 * HUNDREDS_OF_NANOS_IN_A_SECOND;
+    configuration.kvsRtcConfiguration.iceConnectionCheckTimeout = 30 * HUNDREDS_OF_NANOS_IN_A_SECOND;
+    configuration.kvsRtcConfiguration.iceCandidateNominationTimeout = 30 * HUNDREDS_OF_NANOS_IN_A_SECOND;
+
     // Set the ICE mode explicitly
     configuration.iceTransportPolicy = ICE_TRANSPORT_POLICY_ALL;
 

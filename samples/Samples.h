@@ -175,6 +175,7 @@ typedef struct {
     PStackQueue pregeneratedCertificates; // Max MAX_RTCCONFIGURATION_CERTIFICATES certificates
 
     PCHAR rtspUri;
+    PVOID pSelectedVideoDevice; // GstDevice* for selected video capture device (used with DEVICE_SOURCE)
     UINT32 logLevel;
     BOOL enableTwcc;
     BOOL enableIceStats;

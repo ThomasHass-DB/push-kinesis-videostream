@@ -183,6 +183,33 @@ PVOID sendGstreamerAudioVideo(PVOID args)
 
     CHAR rtspPipeLineBuffer[RTSP_PIPELINE_MAX_CHAR_COUNT];
 
+    // Read video pipeline configuration from environment variables (with sensible defaults).
+    // This allows tuning for different hardware (e.g. Raspberry Pi 5 vs laptop) without recompiling.
+    CHAR* envVal = NULL;
+    INT32 videoWidth = 1280;
+    INT32 videoHeight = 720;
+    INT32 videoFps = 25;
+    INT32 videoBitrate = 512;
+    CHAR encoderPreset[32] = "veryfast";
+    CHAR pipelineBuf[1024];
+
+    envVal = GETENV("KVS_VIDEO_WIDTH");
+    if (envVal != NULL && envVal[0] != '\0') videoWidth = (INT32) STRTOUL(envVal, NULL, 10);
+    envVal = GETENV("KVS_VIDEO_HEIGHT");
+    if (envVal != NULL && envVal[0] != '\0') videoHeight = (INT32) STRTOUL(envVal, NULL, 10);
+    envVal = GETENV("KVS_VIDEO_FPS");
+    if (envVal != NULL && envVal[0] != '\0') videoFps = (INT32) STRTOUL(envVal, NULL, 10);
+    envVal = GETENV("KVS_VIDEO_BITRATE");
+    if (envVal != NULL && envVal[0] != '\0') videoBitrate = (INT32) STRTOUL(envVal, NULL, 10);
+    envVal = GETENV("KVS_ENCODER_PRESET");
+    if (envVal != NULL && envVal[0] != '\0') {
+        STRNCPY(encoderPreset, envVal, SIZEOF(encoderPreset) - 1);
+        encoderPreset[SIZEOF(encoderPreset) - 1] = '\0';
+    }
+
+    DLOGI("[KVS GStreamer Master] Pipeline config: %dx%d @ %d fps, bitrate=%d, preset=%s",
+          videoWidth, videoHeight, videoFps, videoBitrate, encoderPreset);
+
     switch (pSampleConfiguration->mediaType) {
         case SAMPLE_STREAMING_VIDEO_ONLY:
             switch (pSampleConfiguration->srcType) {
@@ -208,13 +235,42 @@ PVOID sendGstreamerAudioVideo(PVOID args)
                     break;
                 }
                 case DEVICE_SOURCE: {
-                    senderPipeline = gst_parse_launch(
-                        "autovideosrc ! queue ! videoconvert ! video/x-raw,width=1280,height=720,framerate=25/1 ! "
-                        "x264enc name=sampleVideoEncoder bframes=0 speed-preset=veryfast bitrate=512 byte-stream=TRUE tune=zerolatency ! "
+                    GstElement* videoSrc = NULL;
+                    GstElement* downstreamBin = NULL;
+
+                    if (pSampleConfiguration->pSelectedVideoDevice != NULL) {
+                        videoSrc = gst_device_create_element((GstDevice*) pSampleConfiguration->pSelectedVideoDevice, "videoSrc");
+                    }
+                    if (videoSrc == NULL) {
+                        DLOGI("[KVS GStreamer Master] No specific device selected, falling back to autovideosrc");
+                        videoSrc = gst_element_factory_make("autovideosrc", "videoSrc");
+                    }
+
+                    // Build pipeline dynamically from env-var-configurable parameters.
+                    // videoscale + videorate ensure the camera output is converted to our target
+                    // resolution/framerate regardless of the camera's native capabilities.
+                    SNPRINTF(pipelineBuf, SIZEOF(pipelineBuf),
+                        "queue ! videoconvert ! videoscale ! video/x-raw,width=%d,height=%d ! "
+                        "videorate ! video/x-raw,framerate=%d/1 ! "
+                        "x264enc name=sampleVideoEncoder bframes=0 speed-preset=%s bitrate=%d byte-stream=TRUE tune=zerolatency ! "
                         "video/x-h264,stream-format=byte-stream,alignment=au,profile=baseline ! "
-                        " appsink sync=TRUE "
-                        "emit-signals=TRUE name=appsink-video",
-                        &error);
+                        "appsink sync=TRUE emit-signals=TRUE name=appsink-video",
+                        videoWidth, videoHeight, videoFps, encoderPreset, videoBitrate);
+
+                    downstreamBin = gst_parse_bin_from_description(pipelineBuf, TRUE, &error);
+
+                    if (videoSrc != NULL && downstreamBin != NULL) {
+                        senderPipeline = gst_pipeline_new("device-sender-pipeline");
+                        gst_bin_add_many(GST_BIN(senderPipeline), videoSrc, downstreamBin, NULL);
+                        if (!gst_element_link(videoSrc, downstreamBin)) {
+                            DLOGE("[KVS GStreamer Master] Failed to link video source to downstream pipeline");
+                            gst_object_unref(senderPipeline);
+                            senderPipeline = NULL;
+                        }
+                    } else {
+                        if (videoSrc != NULL) gst_object_unref(videoSrc);
+                        if (downstreamBin != NULL) gst_object_unref(downstreamBin);
+                    }
                     break;
                 }
                 case RTSP_SOURCE: {
@@ -268,14 +324,42 @@ PVOID sendGstreamerAudioVideo(PVOID args)
                     break;
                 }
                 case DEVICE_SOURCE: {
-                    senderPipeline = gst_parse_launch(
-                        "autovideosrc ! queue ! videoconvert ! video/x-raw,width=1280,height=720,framerate=25/1 ! "
-                        "x264enc name=sampleVideoEncoder bframes=0 speed-preset=veryfast bitrate=512 byte-stream=TRUE tune=zerolatency ! "
+                    GstElement* videoSrc = NULL;
+                    GstElement* downstreamBin = NULL;
+
+                    if (pSampleConfiguration->pSelectedVideoDevice != NULL) {
+                        videoSrc = gst_device_create_element((GstDevice*) pSampleConfiguration->pSelectedVideoDevice, "videoSrc");
+                    }
+                    if (videoSrc == NULL) {
+                        DLOGI("[KVS GStreamer Master] No specific device selected, falling back to autovideosrc");
+                        videoSrc = gst_element_factory_make("autovideosrc", "videoSrc");
+                    }
+
+                    // Build pipeline dynamically from env-var-configurable parameters (audio+video)
+                    SNPRINTF(pipelineBuf, SIZEOF(pipelineBuf),
+                        "queue ! videoconvert ! videoscale ! video/x-raw,width=%d,height=%d ! "
+                        "videorate ! video/x-raw,framerate=%d/1 ! "
+                        "x264enc name=sampleVideoEncoder bframes=0 speed-preset=%s bitrate=%d byte-stream=TRUE tune=zerolatency ! "
                         "video/x-h264,stream-format=byte-stream,alignment=au,profile=baseline ! appsink sync=TRUE emit-signals=TRUE "
                         "name=appsink-video autoaudiosrc ! "
                         "queue leaky=2 max-size-buffers=400 ! audioconvert ! audioresample ! opusenc name=sampleAudioEncoder ! "
                         "audio/x-opus,rate=48000,channels=2 ! appsink sync=TRUE emit-signals=TRUE name=appsink-audio",
-                        &error);
+                        videoWidth, videoHeight, videoFps, encoderPreset, videoBitrate);
+
+                    downstreamBin = gst_parse_bin_from_description(pipelineBuf, TRUE, &error);
+
+                    if (videoSrc != NULL && downstreamBin != NULL) {
+                        senderPipeline = gst_pipeline_new("device-sender-pipeline");
+                        gst_bin_add_many(GST_BIN(senderPipeline), videoSrc, downstreamBin, NULL);
+                        if (!gst_element_link(videoSrc, downstreamBin)) {
+                            DLOGE("[KVS GStreamer Master] Failed to link video source to downstream pipeline");
+                            gst_object_unref(senderPipeline);
+                            senderPipeline = NULL;
+                        }
+                    } else {
+                        if (videoSrc != NULL) gst_object_unref(videoSrc);
+                        if (downstreamBin != NULL) gst_object_unref(downstreamBin);
+                    }
                     break;
                 }
                 case RTSP_SOURCE: {
@@ -352,6 +436,180 @@ CleanUp:
     return (PVOID) (ULONG_PTR) retStatus;
 }
 
+/**
+ * Enumerate available video capture devices using GstDeviceMonitor and
+ * let the user select one interactively. If requestedIndex >= 0, that
+ * device is selected automatically without prompting.
+ *
+ * Returns a GstDevice* with an extra ref (caller must gst_object_unref), or NULL.
+ */
+/**
+ * Check whether a GstDevice looks like a real, usable USB/external camera.
+ * Filters out:
+ *  - Raspberry Pi ISP backend nodes ("pispbe")
+ *  - HEVC decoder nodes ("rpi-hevc-dec")
+ *  - V4L2 metadata nodes (device path ending in odd number for paired USB cameras)
+ */
+static gboolean isRealCameraDevice(GstDevice* device)
+{
+    gchar* name = gst_device_get_display_name(device);
+    gboolean dominated = FALSE;
+
+    if (name == NULL) return FALSE;
+
+    // Skip Pi ISP backend and decoder nodes
+    if (g_strcmp0(name, "pispbe") == 0 ||
+        g_str_has_prefix(name, "rpi-hevc") ||
+        g_str_has_prefix(name, "bcm2835")) {
+        dominated = TRUE;
+    }
+
+    g_free(name);
+    if (dominated) return FALSE;
+
+    // Also check via GstStructure properties if available
+    GstStructure* props = gst_device_get_properties(device);
+    if (props != NULL) {
+        const gchar* driver = gst_structure_get_string(props, "v4l2.device.driver");
+        if (driver != NULL) {
+            // Skip Pi-internal drivers
+            if (g_strcmp0(driver, "pispbe") == 0 ||
+                g_strcmp0(driver, "rpivid") == 0 ||
+                g_strcmp0(driver, "bcm2835-codec") == 0) {
+                gst_structure_free(props);
+                return FALSE;
+            }
+        }
+
+        // Skip V4L2 metadata-only nodes (device_caps with META_CAPTURE flag)
+        const gchar* devCaps = gst_structure_get_string(props, "v4l2.device.device_caps");
+        // Metadata-only nodes have a very different capabilities set; for USB cameras
+        // the driver is "uvcvideo" and the card has the camera name.
+        // A simple heuristic: if the device path is /dev/videoN and the next device
+        // in the pair is the metadata node. We rely on the caps check below instead.
+
+        gst_structure_free(props);
+    }
+
+    // Check that the device advertises at least one caps with a real resolution
+    // (metadata nodes and pispbe tend to advertise width=[0,0] or no video caps)
+    GstCaps* caps = gst_device_get_caps(device);
+    if (caps != NULL) {
+        gboolean hasRealCaps = FALSE;
+        guint nStructs = gst_caps_get_size(caps);
+        for (guint i = 0; i < nStructs; i++) {
+            GstStructure* s = gst_caps_get_structure(caps, i);
+            gint width = 0;
+            if (gst_structure_get_int(s, "width", &width) && width > 0) {
+                hasRealCaps = TRUE;
+                break;
+            }
+        }
+        gst_caps_unref(caps);
+        if (!hasRealCaps) return FALSE;
+    }
+
+    return TRUE;
+}
+
+static GstDevice* selectVideoDevice(INT32 requestedIndex)
+{
+    GstDeviceMonitor* monitor = NULL;
+    GList *devices = NULL, *iter = NULL;
+    GstDevice* selectedDevice = NULL;
+    gint count = 0;
+    INT32 selection = -1;
+    CHAR inputBuffer[16];
+
+    // Filtered list of real cameras (pointers into `devices`, do NOT free individually)
+    GList* cameras = NULL;
+
+    monitor = gst_device_monitor_new();
+    gst_device_monitor_add_filter(monitor, "Video/Source", NULL);
+
+    if (!gst_device_monitor_start(monitor)) {
+        DLOGE("[KVS GStreamer Master] Failed to start device monitor");
+        gst_object_unref(monitor);
+        return NULL;
+    }
+
+    devices = gst_device_monitor_get_devices(monitor);
+
+    if (devices == NULL) {
+        DLOGI("[KVS GStreamer Master] No video capture devices found");
+        gst_device_monitor_stop(monitor);
+        gst_object_unref(monitor);
+        return NULL;
+    }
+
+    // Filter to only real cameras (skip Pi ISP, metadata nodes, etc.)
+    for (iter = devices; iter != NULL; iter = g_list_next(iter)) {
+        GstDevice* device = GST_DEVICE(iter->data);
+        if (isRealCameraDevice(device)) {
+            cameras = g_list_append(cameras, device);
+        }
+    }
+
+    if (cameras == NULL) {
+        DLOGI("[KVS GStreamer Master] No usable camera devices found (all filtered out)");
+        g_list_free_full(devices, (GDestroyNotify) gst_object_unref);
+        gst_device_monitor_stop(monitor);
+        gst_object_unref(monitor);
+        return NULL;
+    }
+
+    // Print available cameras (filtered)
+    printf("\n=== Available Video Devices ===\n");
+    for (iter = cameras; iter != NULL; iter = g_list_next(iter)) {
+        GstDevice* device = GST_DEVICE(iter->data);
+        gchar* name = gst_device_get_display_name(device);
+        printf("  [%d] %s\n", count, name);
+        g_free(name);
+        count++;
+    }
+    printf("===============================\n\n");
+
+    if (requestedIndex >= 0) {
+        // Use the provided device index directly
+        if (requestedIndex < count) {
+            selection = requestedIndex;
+        } else {
+            DLOGE("[KVS GStreamer Master] Device index %d out of range (0-%d)", requestedIndex, count - 1);
+        }
+    } else {
+        // Prompt user for selection
+        printf("Select a video device [0-%d]: ", count - 1);
+        fflush(stdout);
+        if (fgets(inputBuffer, sizeof(inputBuffer), stdin) != NULL) {
+            CHAR* endPtr = NULL;
+            long val = strtol(inputBuffer, &endPtr, 10);
+            if (endPtr != inputBuffer && val >= 0 && val < count) {
+                selection = (INT32) val;
+            } else {
+                DLOGE("[KVS GStreamer Master] Invalid selection");
+            }
+        }
+    }
+
+    if (selection >= 0) {
+        selectedDevice = GST_DEVICE(g_list_nth_data(cameras, (guint) selection));
+        if (selectedDevice != NULL) {
+            gchar* name = gst_device_get_display_name(selectedDevice);
+            DLOGI("[KVS GStreamer Master] Selected video device [%d]: %s", selection, name);
+            printf("Using video device [%d]: %s\n\n", selection, name);
+            g_free(name);
+            gst_object_ref(selectedDevice); // Extra ref so it survives g_list_free_full
+        }
+    }
+
+    g_list_free(cameras); // shallow free -- actual GstDevice objects owned by `devices`
+    g_list_free_full(devices, (GDestroyNotify) gst_object_unref);
+    gst_device_monitor_stop(monitor);
+    gst_object_unref(monitor);
+
+    return selectedDevice;
+}
+
 INT32 main(INT32 argc, CHAR* argv[])
 {
     STATUS retStatus = STATUS_SUCCESS;
@@ -359,9 +617,14 @@ INT32 main(INT32 argc, CHAR* argv[])
     PCHAR pChannelName;
     RTC_CODEC audioCodec = RTC_CODEC_OPUS;
     RTC_CODEC videoCodec = RTC_CODEC_H264_PROFILE_42E01F_LEVEL_ASYMMETRY_ALLOWED_PACKETIZATION_MODE;
+    INT32 requestedDeviceIndex = -1; // -1 means prompt; >= 0 selects that device directly
 
     SET_INSTRUMENTED_ALLOCATORS();
     UINT32 logLevel = setLogLevel();
+
+    // Disable stdio buffering so output is visible immediately when not on a TTY
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
 
     signal(SIGINT, sigintHandler);
 
@@ -432,6 +695,10 @@ INT32 main(INT32 argc, CHAR* argv[])
         } else if (STRCMP(argv[3], "devicesrc") == 0) {
             DLOGI("[KVS GStreamer Master] Using device source in GStreamer");
             pSampleConfiguration->srcType = DEVICE_SOURCE;
+            if (argc > 4) {
+                requestedDeviceIndex = (INT32) strtol(argv[4], NULL, 10);
+                DLOGI("[KVS GStreamer Master] Requested device index: %d", requestedDeviceIndex);
+            }
         } else if (STRCMP(argv[3], "rtspsrc") == 0) {
             DLOGI("[KVS GStreamer Master] Using RTSP source in GStreamer");
             if (argc < 5) {
@@ -454,12 +721,20 @@ INT32 main(INT32 argc, CHAR* argv[])
     BOOL hasRtspUriArg = argc > 4 && !IS_EMPTY_STRING(argv[4]);
 
     if (!sourceSpecified) {
-        pSampleConfiguration->srcType = RTSP_SOURCE;
-        pSampleConfiguration->rtspUri = SAMPLE_RTSP_URI;
-        DLOGI("[KVS GStreamer Master] Defaulting to RTSP source %s", pSampleConfiguration->rtspUri);
+        pSampleConfiguration->srcType = DEVICE_SOURCE;
+        DLOGI("[KVS GStreamer Master] Defaulting to device source (USB camera)");
     } else if (pSampleConfiguration->srcType == RTSP_SOURCE && !hasRtspUriArg) {
         pSampleConfiguration->rtspUri = SAMPLE_RTSP_URI;
         DLOGI("[KVS GStreamer Master] Using default RTSP URI %s", pSampleConfiguration->rtspUri);
+    }
+
+    // If using device source, enumerate cameras and let the user select one
+    if (pSampleConfiguration->srcType == DEVICE_SOURCE) {
+        GstDevice* selectedDevice = selectVideoDevice(requestedDeviceIndex);
+        pSampleConfiguration->pSelectedVideoDevice = (PVOID) selectedDevice;
+        if (selectedDevice == NULL) {
+            DLOGI("[KVS GStreamer Master] No specific device selected, will fall back to autovideosrc");
+        }
     }
 
     switch (pSampleConfiguration->mediaType) {
@@ -504,6 +779,12 @@ CleanUp:
         retStatus = freeSignalingClient(&pSampleConfiguration->signalingClientHandle);
         if (retStatus != STATUS_SUCCESS) {
             DLOGE("[KVS GStreamer Master] freeSignalingClient(): operation returned status code: 0x%08x", retStatus);
+        }
+
+        // Clean up selected video device (GstDevice*)
+        if (pSampleConfiguration->pSelectedVideoDevice != NULL) {
+            gst_object_unref((GstDevice*) pSampleConfiguration->pSelectedVideoDevice);
+            pSampleConfiguration->pSelectedVideoDevice = NULL;
         }
 
         retStatus = freeSampleConfiguration(&pSampleConfiguration);
