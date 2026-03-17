@@ -2,10 +2,8 @@
 #
 # run_3_streams_pi.sh — Launch 3 camera streams on Raspberry Pi 5.
 #
-# Each USB camera streams to its own KVS signaling channel:
-#   USB Camera 1 → actionbricks_demo_darts_camera_1
-#   USB Camera 2 → actionbricks_demo_darts_camera_2
-#   USB Camera 3 → actionbricks_demo_darts_camera_3
+# Each USB camera streams to its own KVS signaling channel, derived from hostname:
+#   actionbricks-germany-01 → actionbricks_intelligent_darts_germany_01_camera_{1,2,3}
 #
 # Authentication uses AWS IoT Core X.509 certificates, which automatically
 # refresh temporary credentials — no manual key rotation needed.
@@ -53,7 +51,9 @@ IOT_REGION="${AWS_DEFAULT_REGION:-us-west-2}"
 # actionbricks-germany-01 → pi_germany_01
 
 RAW_HOSTNAME="$(hostname)"
-IOT_THING_NAME="${AWS_IOT_CORE_THING_NAME:-pi_$(echo "$RAW_HOSTNAME" | sed 's/^actionbricks-//' | tr '-' '_')}"
+LOCATION="$(echo "$RAW_HOSTNAME" | sed 's/^actionbricks-//' | tr '-' '_')"
+IOT_THING_NAME="${AWS_IOT_CORE_THING_NAME:-pi_${LOCATION}}"
+CHANNEL_PREFIX="actionbricks_intelligent_darts_${LOCATION}"
 
 # ── Verify binary exists ─────────────────────────────────────────────────────
 
@@ -148,9 +148,9 @@ echo ""
 echo "  Video : ${KVS_VIDEO_WIDTH}x${KVS_VIDEO_HEIGHT} @ ${KVS_VIDEO_FPS} fps"
 echo "  Encode: x264enc preset=${KVS_ENCODER_PRESET}, bitrate=${KVS_VIDEO_BITRATE} kbps"
 echo ""
-echo "  Camera 0 (device index 0) → actionbricks_demo_darts_camera_1"
-echo "  Camera 1 (device index 1) → actionbricks_demo_darts_camera_2"
-echo "  Camera 2 (device index 2) → actionbricks_demo_darts_camera_3"
+echo "  Camera 0 (device index 0) → ${CHANNEL_PREFIX}_camera_1"
+echo "  Camera 1 (device index 1) → ${CHANNEL_PREFIX}_camera_2"
+echo "  Camera 2 (device index 2) → ${CHANNEL_PREFIX}_camera_3"
 echo ""
 echo "Press Ctrl+C to stop all streams"
 echo "=========================================="
@@ -159,13 +159,13 @@ echo ""
 cd "$BUILD_DIR"
 
 # Launch all 3 streams in the background
-./samples/kvsWebrtcClientMasterGstSample actionbricks_demo_darts_camera_1 video-only devicesrc 0 &
+./samples/kvsWebrtcClientMasterGstSample "${CHANNEL_PREFIX}_camera_1" video-only devicesrc 0 &
 PID1=$!
 
-./samples/kvsWebrtcClientMasterGstSample actionbricks_demo_darts_camera_2 video-only devicesrc 1 &
+./samples/kvsWebrtcClientMasterGstSample "${CHANNEL_PREFIX}_camera_2" video-only devicesrc 1 &
 PID2=$!
 
-./samples/kvsWebrtcClientMasterGstSample actionbricks_demo_darts_camera_3 video-only devicesrc 2 &
+./samples/kvsWebrtcClientMasterGstSample "${CHANNEL_PREFIX}_camera_3" video-only devicesrc 2 &
 PID3=$!
 
 echo "Stream PIDs: CAM1=$PID1  CAM2=$PID2  CAM3=$PID3"
