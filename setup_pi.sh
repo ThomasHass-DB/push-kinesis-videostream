@@ -44,7 +44,8 @@ cd "$BUILD_DIR"
 
 cmake "$SCRIPT_DIR" \
     -DBUILD_OPENSSL_PLATFORM=linux-aarch64 \
-    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_BUILD_TYPE=Release \
+    -DIOT_CORE_ENABLE_CREDENTIALS=ON
 
 echo ""
 echo "  CMake configuration complete."
@@ -68,6 +69,9 @@ echo "The sample binary is at:"
 echo "  $BUILD_DIR/samples/kvsWebrtcClientMasterGstSample"
 echo ""
 echo "Next steps:"
-echo "  1. Export your AWS credentials (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, AWS_DEFAULT_REGION)"
+echo "  1. Ensure your X.509 certs are in ~/certs/ (*.private.key, *.cert.pem, AmazonRootCA1.pem)"
 echo "  2. Run:  ./run_3_streams_pi.sh"
+echo ""
+echo "The IoT Thing name is derived automatically from the hostname:"
+echo "  $(hostname) → pi_$(echo "$(hostname)" | sed 's/^actionbricks-//' | tr '-' '_')"
 echo ""
